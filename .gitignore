@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual Environment
+venv/
+.env/
+
+# Docker
+.DS_Store
+docker-compose.yml
+docker-compose.override.yml
+.dockerignore
+
+# Editor/IDE
+.vscode/
+.idea/
+
+# Miscellaneous
+*.log
+*.pyc
+*.swp
+.DS_Store
+
+# Ignore build artifacts
+/build/
+*.egg-info/
+*.egg
+dist/
+htmlcov/
+
+# Ignore generated files
+/public/index.html
+
+# Terraform
+.terraform/
+terraform.tfstate
+terraform.tfstate.backup
