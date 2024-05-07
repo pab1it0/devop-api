@@ -46,7 +46,7 @@ make run
 
 Cleanup
 ```bash
-make run
+make cleanup
 ```
 
 ### E2E Deoployment
@@ -63,13 +63,6 @@ make destroy env_id=<your_env_id>
 Terraform fmt
 ```bash
 make fix/ffmt
-```
-
-
-### Cleanup
-
-```bash
-make cleanup
 ```
 
 <!--links-->
