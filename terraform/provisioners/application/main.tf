@@ -2,7 +2,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "= 5.24.0"
+      version = "= 5.46.0"
     }
   }
   required_version = ">= 1.0"
@@ -22,7 +22,7 @@ provider "aws" {
   }
 }
 
-module "provision_api_ecr_repo" {
+module "devops_api_ecr_repo" {
   source          = "../../modules/aws-ecr"
   resource_prefix = "${var.env_id}-devops-api"
   tag_mutability  = "IMMUTABLE"

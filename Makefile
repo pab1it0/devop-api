@@ -3,8 +3,9 @@ USER := $(shell id -u -n)
 OS := $(shell uname -s | tr '[:upper:]' '[:lower:]')
 GIT_ROOT := $(shell git rev-parse --show-toplevel)
 
-APP_HOST := 0.0.0.0
-APP_PORT := 5400
+env_id :=
+host := 0.0.0.0
+port := 5400
 devops_api_tag := latest
 tf_version := 1.8.2
 
@@ -33,7 +34,7 @@ build:
 
 ## run: Run devops-api locally
 run: cleanup build
-	docker run -d --name devops-api -p $(APP_PORT):$(APP_PORT) -e PORT=$(APP_PORT) -e HOST=$(APP_HOST) devops-api:$(devops_api_tag) || { ${MAKE} cleanup ; exit 1; };
+	docker run -d --name devops-api -p $(port):$(port) -e PORT=$(port) -e HOST=$(host) devops-api:$(devops_api_tag) || { ${MAKE} cleanup ; exit 1; };
 	docker logs -f devops-api || { ${MAKE} cleanup ; exit 1; };
 
 ## tffmt: Run terraform fmt
@@ -46,47 +47,37 @@ fix/tffmt:
 	@echo Running terraform fmt...
 	terraform fmt -recursive --diff --write=true
 
-## plan: Run terraform plan. example -> make plan env_id=prod-us-east-1
-.ONESHELL:
-plan: tffmt
-	@echo "Running terraform plan..."
-	cd $(GIT_ROOT)/devops-api/$(env_id)/ecr
-	terraform init
-	-@terraform workspace new $(env_id)
-	-@terraform workspace select $(env_id)
-	terraform plan -lock=false -compact-warnings -var-file="$(GIT_ROOT)/tfvars/$(env_id).tfvars.json"
-	export TF_VAR_devops_api_image_name=some-repo:$(devops_api_tag)
-	cd $(GIT_ROOT)/devops-api/$(env_id)/infra
-	terraform init
-	-@terraform workspace new $(env_id)
-	-@terraform workspace select $(env_id)
-	terraform plan -lock=false -compact-warnings -var-file="$(GIT_ROOT)/tfvars/$(env_id).tfvars.json"
-
-## deploy: Run terraform apply. example -> make deploy env_id=prod-us-east-1
 .ONESHELL:
 deploy: tffmt
-	@echo "Running terraform deploy..."
-	# Deploy infra
-	cd $(GIT_ROOT)/devops-api/$(env_id)/ecr
+	@echo "Builing and deploying application resources..."
+	cd $(GIT_ROOT)/terraform/provisioners/application
 	terraform init
-	-@terraform workspace new $(env_id)
-	-@terraform workspace select $(env_id)
-	terraform apply -compact-warnings -var-file="$(GIT_ROOT)/tfvars/$(env_id).tfvars.json" -auto-approve
-
-	export ECR_REPO_URL=$$(terraform output -raw provision_api_ecr_repository_url)
+	terraform workspace select $(env_id) || terraform workspace new $(env_id)
+	terraform apply -compact-warnings -var-file="$(GIT_ROOT)/terraform/provisioners/$(env_id).tfvars" -auto-approve
+	@echo "Deployed successfully"
+	export ECR_REPO_URL=$$(terraform output -raw devops_api_ecr_repository_url)
 	export AWS_ACCOUNT=$$(terraform output -raw aws_account)
 	export AWS_REGION=$$(terraform output -raw aws_region)
-	aws ecr get-login-password --region $$AWS_REGION | docker login --username AWS --password-stdin $$AWS_ACCOUNT.dkr.ecr.$$AWS_REGION.amazonaws.com
+
+	@echo "Pushing devops-api:$(devops_api_tag) to ECR..."
+	docker login -u AWS -p $(aws ecr get-login-password --region $$AWS_REGION) $$AWS_ACCOUNT.dkr.ecr.$$AWS_REGION.amazonaws.com
 	docker tag devops-api:$(devops_api_tag) $$ECR_REPO_URL:$(devops_api_tag)
 	docker push $$ECR_REPO_URL:$(devops_api_tag)
-
 	export TF_VAR_devops_api_image_name=$$ECR_REPO_URL:$(devops_api_tag)
-	cd $(GIT_ROOT)/devops-api/$(env_id)/infra
-	terraform init
-	-@terraform workspace new $(env_id)
-	-@terraform workspace select $(env_id)
-	terraform apply -compact-warnings -var-file="$(GIT_ROOT)/tfvars/$(env_id).tfvars.json" -auto-approve
+	export TF_VAR_devops_api_ecr_arn=$$(terraform output -raw ecr_repository_arn)
 
+	@echo $$TF_VAR_devops_api_ecr_arn
+
+	@echo "Deploying infra..."
+	cd $(GIT_ROOT)/terraform/provisioners/infra
+	terraform init
+	terraform workspace select $(env_id) || terraform workspace new $(env_id)
+	terraform apply -compact-warnings -var-file="$(GIT_ROOT)/terraform/provisioners/$(env_id).tfvars" -auto-approve
+	export BUCKET_NAME=$$(terraform output -raw static_files_bucket_name)
+
+	@echo "Uploading static files to S3..."
+	cd $(GIT_ROOT)
+	aws s3 sync $(GIT_ROOT)/public s3://$$BUCKET_NAME --delete
 ## destroy: Run terraform destroy. example -> make destroy env_id=prod-us-east-1
 .ONESHELL:
 destroy:
@@ -96,7 +87,7 @@ destroy:
 	if terraform workspace select $(env_id) ; then
 		echo "Workspace exists destroying infra resources..."
 		terraform workspace select $(env_id)
-		terraform destroy -compact-warnings -var-file="$(GIT_ROOT)/tfvars/$(env_id).tfvars.json" -auto-approve
+		terraform destroy -compact-warnings -var-file="$(GIT_ROOT)/terraform/provisioners/$(evn_id).tfvars/$(env_id).tfvars.json" -auto-approve
 	else
 		echo "Workspace does not exist, skipping to next state"
 	fi
@@ -106,10 +97,10 @@ destroy:
 	if terraform workspace select $(env_id) ; then
 		echo "Workspace exists destroying ecr resources..."
 		terraform workspace select $(env_id)
-		terraform destroy -compact-warnings -var-file="$(GIT_ROOT)/tfvars/$(env_id).tfvars.json" -auto-approve
+		terraform destroy -compact-warnings -var-file="$(GIT_ROOT)/terraform/provisioners/$(evn_id).tfvars/$(env_id).tfvars.json" -auto-approve
 	else
 		echo "Workspace does not exist, skipping to next state"
 	fi
 	cd $(GIT_ROOT)&& ${MAKE} cleanup
 
-.PHONY: cleanup build run tffmt fix/tffmt deploy destroy plan install/tf 
+.PHONY: cleanup build run tffmt fix/tffmt deploy destroy install/tf 
