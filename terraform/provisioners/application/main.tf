@@ -25,5 +25,5 @@ provider "aws" {
 module "devops_api_ecr_repo" {
   source          = "../../modules/aws-ecr"
   resource_prefix = "${var.env_id}-devops-api"
-  tag_mutability  = "IMMUTABLE"
+  tag_mutability  = "MUTABLE"
 }
