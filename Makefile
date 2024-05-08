@@ -48,7 +48,7 @@ fix/tffmt:
 	terraform fmt -recursive --diff --write=true
 
 .ONESHELL:
-deploy: tffmt
+deploy: build tffmt
 	@echo "Builing and deploying application resources..."
 	cd $(GIT_ROOT)/terraform/provisioners/application
 	terraform init
@@ -66,8 +66,6 @@ deploy: tffmt
 	export TF_VAR_devops_api_image_name=$$ECR_REPO_URL:$(devops_api_tag)
 	export TF_VAR_devops_api_ecr_arn=$$(terraform output -raw ecr_repository_arn)
 
-	@echo $$TF_VAR_devops_api_ecr_arn
-
 	@echo "Deploying infra..."
 	cd $(GIT_ROOT)/terraform/provisioners/infra
 	terraform init
@@ -78,29 +76,39 @@ deploy: tffmt
 	@echo "Uploading static files to S3..."
 	cd $(GIT_ROOT)
 	aws s3 sync $(GIT_ROOT)/public s3://$$BUCKET_NAME --delete
-## destroy: Run terraform destroy. example -> make destroy env_id=prod-us-east-1
+
 .ONESHELL:
 destroy:
 	@echo "Running terraform destroy..."
-	cd $(GIT_ROOT)/devops-api/$(env_id)/infra
+	cd $(GIT_ROOT)/terraform/provisioners/infra
+	terraform workspace select $(env_id) || terraform workspace new $(env_id)
+	@echo "Deleting the content of static files bucket..."
+	export S3_BUCKET=$$(terraform output -raw static_files_bucket_name)
+	@echo "S3_BUCKET: $$S3_BUCKET"
+	aws s3 rm s3://$$S3_BUCKET --recursive
+	
+	@echo "Getting the needed output values..."
+	cd $(GIT_ROOT)/terraform/provisioners/application
 	terraform init
-	if terraform workspace select $(env_id) ; then
-		echo "Workspace exists destroying infra resources..."
-		terraform workspace select $(env_id)
-		terraform destroy -compact-warnings -var-file="$(GIT_ROOT)/terraform/provisioners/$(evn_id).tfvars/$(env_id).tfvars.json" -auto-approve
-	else
-		echo "Workspace does not exist, skipping to next state"
-	fi
+	export TF_VAR_devops_api_image_name=$$ECR_REPO_URL:$(devops_api_tag)
+	export TF_VAR_devops_api_ecr_arn=$$(terraform output -raw ecr_repository_arn)
 
-	cd $(GIT_ROOT)/devops-api/$(env_id)/ecr
+	@echo "Destroying infra resources..."
+	cd $(GIT_ROOT)/terraform/provisioners/infra
+	terraform workspace select $(env_id) || terraform workspace new $(env_id)
+	terraform destroy -compact-warnings -var-file="$(GIT_ROOT)/terraform/provisioners/$(env_id).tfvars" -auto-approve
+
+	@echo "Deleting ECR repository content..."
+	aws ecr batch-delete-image --repository-name $(env_id)-devops-api --image-ids imageTag=$(devops_api_tag)
+
+	@echo "Destroying application resources..."
+	cd $(GIT_ROOT)/terraform/provisioners/application
 	terraform init
-	if terraform workspace select $(env_id) ; then
-		echo "Workspace exists destroying ecr resources..."
-		terraform workspace select $(env_id)
-		terraform destroy -compact-warnings -var-file="$(GIT_ROOT)/terraform/provisioners/$(evn_id).tfvars/$(env_id).tfvars.json" -auto-approve
-	else
-		echo "Workspace does not exist, skipping to next state"
-	fi
+	terraform workspace select $(env_id) || terraform workspace new $(env_id)
+	terraform destroy -compact-warnings -var-file="$(GIT_ROOT)/terraform/provisioners/$(env_id).tfvars" -auto-approve
+
+	@echo "Destroy completed successfully"
+	@echo "Cleaning up docker resources..."
 	cd $(GIT_ROOT)&& ${MAKE} cleanup
 
 .PHONY: cleanup build run tffmt fix/tffmt deploy destroy install/tf 
